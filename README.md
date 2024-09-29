@@ -6,6 +6,9 @@ For GTEX data, see https://github.com/ebi-gene-expression-group/atlas-gtex-bulk.
 ## Prerequisites
 - Snakemake >= 7.25.3
 - SLURM cluster management and job scheduling system
+- Two scripts located at the config `private_script`:
+  - gtex_bulk_env.sh
+  - gtex_bulk_init.sh
 
 ## Analysis of EGA datasets
 
@@ -27,5 +30,6 @@ metadata
     |- EGAD00001011134.enaIds.txt
 ```
 The file `.enaIds.txt` is provided by curators and contains the matches between EGA run and ENA run ids.
+
 
 ## 2. Data analysis
