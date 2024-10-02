@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 
+# SLURM equivalent to the aggregate_lsf.sh script.
+# Most functions are the same, except 'isl_lsf_submit' and 'isl_lsf_monitor'.
+# Until isl is fully migrated to SLURM, this script is a temporary solution to run isl aggregation on SLURM.
+
 # This script collates irap_single_lib results of individual libraries into one set of outputs for a given study.
 # This is intended to run as a non-fg_atlas user, without access to the ISL database.
-# The direct application of this script is to aggregate single-library results of a controlled-access study, such as GTEx or EGA
+# The direct application of this script is to aggregate single-library results of a controlled-access study, such as GTEx or EGA.
 
 source $IRAP_SINGLE_LIB/ega_bulk_env.sh
 
@@ -11,7 +15,6 @@ source ${scriptDir}/../isl/lib/functions.sh
 
 studyId=$1
 organism="homo_sapiens"
-#lsfMem=${2:-4096}
 slurmMem=${2:-4096}
 
 check_variables 'studyId'
@@ -90,35 +93,39 @@ echo $libraryPathsForStudy > $aux
 # Submit aggregation to cluster
 
 aggrCmd="irap_single_lib2report_atlas -B -j 4 folders_file=$aux out=$ISL_WORKING_DIR/studies/$studyId/$organism name=$studyId"
-#isl_lsf_submit 'aggregate' ${studyId}.${organism} "/irap_ega" $lsfMem 1 $ISL_WORKING_DIR "$aggrCmd"
-job_id=$(sbatch -c 1 --mem $slurmMem ... | awk '{print $4}')
-echo "Job $job_id submitted to slurm"
+job_name="isl.aggregate.${studyId}.${organism}"
+job_id=$(sbatch -J $job_name --mem $slurmMem -c 1 -e ${job_name}.err -o ${job_name}.out --chdir=$ISL_WORKING_DIR -p production $aggrCmd | awk '{print $4}')
+echo "Job $job_id submitted to slurm - aggregation for ${studyId} ${organism}"
 
-# modify the below to check for job completion
-if [ $? -ne 0 ]; then
-    echo  "[ERROR] Failed to submit to lsf job: '$aggrCmd'" 
-    exit 1
-else
-    echo "Submitted aggregation for ${studyId} ${organism}"
 
-    # Monitor aggregation job
-    monitorLogPrefix=$(get_log_prefix processing 'aggregate' ${studyId}.${organism})
-    monitorLog="${monitorLogPrefix}.log"
-    isl_lsf_monitor 'aggregate' 1 $monitorLog
+# Monitor aggregation job
+while true; do
+    sleep 20
+    status=$(squeue -h -j $job_id -o %T)
+    echo "SLURM job $job_id has the status: $status "
+    echo $(jobs -p)
 
     # Once done, move to the fg_atlas ISL studies dir.
-    if [ $? -ne 0 ]; then
-        echo "LSF processing completed with errors"
-        exit 1
-    else
-        echo "LSF processing completed, no errors"
-
+    if [ "$status" = "COMPLETED" ] || [ "$status" = "" ]; then
+        echo "SLURM processing completed, no errors. Successful run!"
+        JOB_INFO=$(seff $job_id)
+        echo "$JOB_INFO"
+    
         # Move results to results directory
         resultsDir=$(process_results_dir $studyId aggregate $organism 'no')
-        rm -rf $resultsDir && mkdir -p $(dirname $resultsDir) && mv $workingDir $resultsDir            
-    fi
-fi
+        rm -rf $resultsDir && mkdir -p $(dirname $resultsDir) && mv $workingDir $resultsDir
+        exit 0
 
+    elif [ "$status" = "RUNNING" ]; then
+        echo "..job status is RUNNING.."
+
+    elif [ "$status" = "FAILED" ]; then
+        echo "SLURM processing completed with errors, see logs"
+        JOB_INFO=$(seff $job_id)
+        echo "$JOB_INFO"
+        exit 1
+    fi
+done
 
 
 # Once move is done, generate a file that indicates that the process is done.
