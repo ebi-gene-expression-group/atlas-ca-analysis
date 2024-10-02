@@ -1,5 +1,5 @@
 # Atlas analysis for controlled-access datasets
-This repo initially is for the analysis of RNA sequencing data coming from European Genome-phenome Archive (EGA), but it will be extended to other sources. 
+This repo initially is for the analysis of human RNA sequencing data coming from European Genome-phenome Archive (EGA), but it will be extended to other sources. 
 
 For GTEX RNA-seq data, see https://github.com/ebi-gene-expression-group/atlas-gtex-bulk.
 
@@ -9,6 +9,8 @@ For GTEX RNA-seq data, see https://github.com/ebi-gene-expression-group/atlas-gt
 - Two scripts located at the config `private_script`:
   - ega_bulk_env.sh
   - ega_bulk_init.sh
+- The irap human config file
+  - homo_sapiens.conf 
 
 ## 1. Analysis of EGA datasets
 
@@ -29,7 +31,7 @@ metadata
     |- EGAD00001011134.merged.csv
     |- EGAD00001011134.enaIds.txt
 ```
-The file `.enaIds.txt` is provided by curators and contains the matches between EGA run and ENA run ids.
+The file `.enaIds.txt` is provided by curators and contains two columns with the matches between EGA run and ENA run ids.
 
 Then run the `Snakefile-ega` workflow:
 
@@ -63,4 +65,12 @@ snakemake --restart-times 1 --keep-going \\
     irap_config=/path-to-config/homo_sapiens.conf \\
   -s Snakefile-irap
 
+```
+
+## 2.3 Library aggregation
+
+Finally collate irap_single_lib results of individual libraries running
+
+```
+scripts/aggregate_slurm.sh
 ```
