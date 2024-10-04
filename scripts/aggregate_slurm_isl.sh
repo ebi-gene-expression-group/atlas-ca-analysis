@@ -91,7 +91,7 @@ echo $libraryPathsForStudy > $aux
 # Submit aggregation to cluster
 
 aggrCmd="irap_single_lib2report_atlas -B -j 4 folders_file=$aux out=$ISL_WORKING_DIR/studies/$studyId/$organism name=$studyId"
-isl_slurm_submit 'aggregate' ${studyId}.${organism} $lsfMem 1 $ISL_WORKING_DIR "$aggrCmd"
+isl_slurm_submit 'aggregate' ${studyId}.${organism} $slurmMem 1 $ISL_WORKING_DIR "$aggrCmd"
 
 if [ $? -ne 0 ]; then
     echo  "[ERROR] Failed to submit to Slurm job: '$aggrCmd'" 
