@@ -9,7 +9,6 @@ min_version("7.25.3")
 include: "rules/common.smk" 
 
 
-
 metadata_df = read_metadata(config["metadata_path"], config["dataset_id"] )
 
 # print metadata table
@@ -42,12 +41,10 @@ def get_unique_ega_filenames(merged_table):
 EGA_FILENAMES = get_unique_ega_filenames(metadata_df)
 
 
-
 SAMPLES = get_unique_ena_runs(metadata_df)
 print(f"unique EGA filenames: {EGA_FILENAMES}")
 print(f"unique FASTQ filenames: {FASTQ_FILENAMES}")
 print(f"unique ENA filenames (final sample names): {SAMPLES}")
-
 
 
 wildcard_constraints:
@@ -57,7 +54,6 @@ wildcard_constraints:
 
 rule all:
     input: "out/workflow-ega.done"
-
 
 
 rule create_metadata:
@@ -70,8 +66,6 @@ rule create_metadata:
         with open(output[0], "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerows(metadata_df)
-
-
 
 
 rule check_initial_data:
@@ -134,32 +128,32 @@ rule rename_fastqs:
         set -e # snakemake on the cluster doesn't stop on error when --keep-going is set
         exec &> "{log}"
 
-	    # remove possible trailing spaces
-	    sed -i 's/[[:space:]]*$//g' {params.metad}
+	# remove possible trailing spaces
+	sed -i 's/[[:space:]]*$//g' {params.metad}
 
-	    # loop over unique ERR* values in the second column
-	    cut -d, -f2 {params.metad} | sort -u | while read -r err; do
+	# loop over unique ERR* values in the second column
+	cut -d, -f2 {params.metad} | sort -u | while read -r err; do
     	    echo "ERR: $err"
             mkdir out/$err
 
     	    # for each unique ERR* value, find the associated rows and print the desired paths
     	    grep ",$err," {params.metad} | while IFS=, read -r egar_value ena_value sample_file egaf_value; do
 
-        	    echo "{params.input_path}/$egaf_value/$sample_file"
+        	echo "{params.input_path}/$egaf_value/$sample_file"
                 paired_suffix=$(echo "$sample_file" | awk -F'_' '{{print "_" $2}}')
                 echo "out/$err/$err$paired_suffix"
 
-		        # check file exists and rename
+		# check file exists and rename
                 if [ -f "{params.input_path}/$egaf_value/$sample_file" ]; then
-		            echo "Copying file {params.input_path}/$egaf_value/$sample_file >> out/$err/$err$paired_suffix"
+		    echo "Copying file {params.input_path}/$egaf_value/$sample_file >> out/$err/$err$paired_suffix"
                     cp {params.input_path}/$egaf_value/$sample_file out/$err/$err$paired_suffix
-		        fi
+		fi
     	    done
     
 
-	    done
+	done
 
-	    touch {output}
+	touch {output}
         """
 
 
