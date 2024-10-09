@@ -226,7 +226,7 @@ rule run_irap:
 rule prepare_aggregation:
     """
     Prepare aggregation of irap outputs, which are at
-    $ISL_WORKING_DIR/irap_single_lib/{sample[0:5]}/{sample}
+    $ISL_WORKING_DIR/irap_single_lib/{root_dir}/out/{sample}
     and copy essential aggregation files into:
     $IRAP_SINGLE_LIB/out/{sample[0:5]}/{sample}
     """
@@ -234,7 +234,8 @@ rule prepare_aggregation:
     output: "out/{sample}/{sample}_prepare_aggregation.done"
     log: "logs/{sample}_prepare_agreggation.log"
     params:
-        private_script=config["private_script"]
+        private_script=config["private_script"],
+        root_dir=config["atlas_ca_root"]
     shell:
         """
         set -e # snakemake on the cluster doesn't stop on error when --keep-going is set
@@ -248,11 +249,11 @@ rule prepare_aggregation:
         destination_dir=$ISL_RESULTS_DIR/$prefix_sample/{wildcards.sample}
         mkdir -p $destination_dir
 
-        cp $ISL_WORKING_DIR/irap_single_lib/$prefix_sample/{wildcards.sample}/{wildcards.sample}*kallisto*  $destination_dir/
-        cp $ISL_WORKING_DIR/irap_single_lib/$prefix_sample/{wildcards.sample}/{wildcards.sample}*htseq2*  $destination_dir/
-        cp $ISL_WORKING_DIR/irap_single_lib/$prefix_sample/{wildcards.sample}/{wildcards.sample}.versions.tsv  $destination_dir/irap.versions.tsv
-        cp -r $ISL_WORKING_DIR/irap_single_lib/$prefix_sample/{wildcards.sample}/logs  $destination_dir/
-        cp -r $ISL_WORKING_DIR/irap_single_lib/$prefix_sample/{wildcards.sample}/qc  $destination_dir/
+        cp $ISL_WORKING_DIR/irap_single_lib{params.root_dir}/out/{wildcards.sample}/{wildcards.sample}*kallisto*  $destination_dir/
+        cp $ISL_WORKING_DIR/irap_single_lib{params.root_dir}/out/{wildcards.sample}/{wildcards.sample}*htseq2*  $destination_dir/
+        cp $ISL_WORKING_DIR/irap_single_lib{params.root_dir}/out/{wildcards.sample}/{wildcards.sample}.versions.tsv  $destination_dir/irap.versions.tsv
+        cp -r $ISL_WORKING_DIR/irap_single_lib{params.root_dir}/out/{wildcards.sample}/logs  $destination_dir/
+        cp -r $ISL_WORKING_DIR/irap_single_lib{params.root_dir}/out/{wildcards.sample}/qc  $destination_dir/
 
         # file checks
         if ls "$destination_dir"/*kallisto* 1> /dev/null 2>&1; then
@@ -271,13 +272,6 @@ rule prepare_aggregation:
 
         echo "tophat2 align summary:"
         cat $ISL_WORKING_DIR/processing_data/h/homo_sapiens/irap_qc/tophat2/*/{wildcards.sample}/{wildcards.sample}/align_summary.txt
-
-        echo "removing other temp files in $ISL_RAW_DIR and $ISL_WORKING_DIR "
-        rm -f $ISL_RAW_DIR/$prefix_sample/{wildcards.sample}/{wildcards.sample}*
-        rm -rf $ISL_WORKING_DIR/irap_single_lib/$prefix_sample/{wildcards.sample}
-        rm -rf $ISL_WORKING_DIR/processing_data/h/homo_sapiens/irap_qc/tophat2/*/{wildcards.sample}
-        rm -rf $ISL_WORKING_DIR/processing_data/h/homo_sapiens/irap_qc/none/kallisto/*/{wildcards.sample}
-        rm -rf $ISL_WORKING_DIR/processing_data/h/homo_sapiens/irap_qc/tophat2/htseq2/*/{wildcards.sample}
 
         echo "Controlled-access analysis for EGA dataset completed for {wildcards.sample}. Ready for aggregation"
 
