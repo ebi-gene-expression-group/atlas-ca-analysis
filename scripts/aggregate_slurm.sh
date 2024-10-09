@@ -94,7 +94,7 @@ echo $libraryPathsForStudy > $aux
 
 aggrCmd="irap_single_lib2report_atlas -B -j 4 folders_file=$aux out=$ISL_WORKING_DIR/studies/$studyId/$organism name=$studyId"
 job_name="isl.aggregate.${studyId}.${organism}"
-job_id=$(sbatch --time 7-00:00:00 -J $job_name --mem $slurmMem -c 1 -e ${job_name}.err -o ${job_name}.out --chdir=$ISL_WORKING_DIR -p production --wrap "$aggrCmd" | awk '{print $4}')
+job_id=$(sbatch --time 7-00:00:00 -J $job_name --mem $slurmMem -c 1 -e ${job_name}.err -o ${job_name}.out --chdir=$ISL_WORKING_DIR -p production --wrap $aggrCmd | awk '{print $4}')
 echo "Job $job_id submitted to slurm - aggregation for ${studyId} ${organism}"
 
 
