@@ -1,4 +1,3 @@
-
 def read_metadata(metadatapath, dataid):
     """
     Read and merge the two metadata tables
@@ -9,21 +8,21 @@ def read_metadata(metadatapath, dataid):
     merged_data = {}
 
     # read the metadata file (merged.csv)
-    with open(metadata_file, 'r') as file:
-        metadata = [line.strip().split('\t') for line in file.readlines()]
+    with open(metadata_file, "r") as file:
+        metadata = [line.strip().split("\t") for line in file.readlines()]
 
     # read the enaIds.txt file
-    with open(ena_ids_file, 'r') as file:
-        ena_ids = [line.strip().split('\t') for line in file.readlines()]
+    with open(ena_ids_file, "r") as file:
+        ena_ids = [line.strip().split("\t") for line in file.readlines()]
 
     # create a dictionary from ena_ids where key is ega_run_id and value is ena_run_id
     ena_dict = {line[0]: line[1] for line in ena_ids[1:]}  # skip the header
 
     # find indices for the required columns in the metadata file
     header = metadata[0]
-    ega_run_id_idx = header.index('ega_run_id')
-    filename_idx = header.index('filename')
-    file_accession_id_idx = header.index('file_accession_id')
+    ega_run_id_idx = header.index("ega_run_id")
+    filename_idx = header.index("filename")
+    file_accession_id_idx = header.index("file_accession_id")
 
     # final data with selected columns
     final_data = []
@@ -54,11 +53,14 @@ def get_mem_mb(wildcards, attempt):
     attemps = reiterations + 1
     Max number attemps = 6
     """
-    mem_avail = [ 48, 64, 96, 128, 210, 300 ]
+    mem_avail = [48, 64, 96, 128, 210, 300]
     if attempt > len(mem_avail):
-        print(f"Attemps {attempt} exceeds the maximum number of attemps: {len(mem_avail)}")
-        print(f"modify value of --restart-times or adjust mem_avail resources accordingly")
+        print(
+            f"Attemps {attempt} exceeds the maximum number of attemps: {len(mem_avail)}"
+        )
+        print(
+            f"modify value of --restart-times or adjust mem_avail resources accordingly"
+        )
         sys.exit(1)
     else:
-        return mem_avail[attempt-1] * 1000
-
+        return mem_avail[attempt - 1] * 1000
