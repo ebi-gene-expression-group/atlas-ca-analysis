@@ -196,6 +196,8 @@ rule run_irap:
 
         pushd $workingDir > /dev/null
 
+        export THREADS={threads} # for irap_single_lib
+
         if [[ {params.read_type} == "se" ]]; then
             # fastq is SE
             cp {params.root_dir}/{input.fq1} $workingDir/${{localFastqPath}}.fastq
