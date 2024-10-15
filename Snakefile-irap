@@ -1,0 +1,293 @@
+import os
+import csv
+from tabulate import tabulate
+from snakemake.utils import min_version
+
+
+min_version("7.25.3")
+
+include: "rules/common.smk"
+
+
+
+metadata_df = read_metadata(config["metadata_path"], config["dataset_id"] )
+
+SAMPLES = get_unique_ena_runs(metadata_df)
+
+FIRST_SAMPLE = str(SAMPLES[0])
+
+print(f"Samples to be analysed: {SAMPLES}")
+
+
+wildcard_constraints:
+    sample="ERR\d+"
+
+
+rule all:
+    input: "out/workflow-irap.done"
+
+
+rule validating_fastq_pairs:
+    input:
+        fq1 = "out/{sample}/{sample}_1.fastq.gz",
+        fq2 = "out/{sample}/{sample}_2.fastq.gz"
+    output:
+        "out/{sample}/{sample}_validating_fastq_pairs.done"
+    log:
+        "logs/{sample}_validating_fastq_pairs.log"
+    conda:
+        "envs/fastq_utils.yml"
+    resources: 
+        mem_mb=get_mem_mb
+    shell:
+        """
+        set -e # snakemake on the cluster doesn't stop on error when --keep-going is set
+        exec &> "{log}"
+
+        fastq_info {input.fq1} {input.fq2}
+        if [ $? -ne 0 ]; then
+            echo "ERROR: Failed fastq validation for {input.fq1} and {input.fq2}"
+            exit 1
+        else
+            echo "validation successful for {input.fq1} and {input.fq2}"
+        fi
+
+        touch {output}
+        """
+
+
+rule run_irap_stage0:
+    """
+    This ensures Irap stage0 is run only once, for the first sample
+    """
+    input:
+        fq1 = f"out/{FIRST_SAMPLE}/{FIRST_SAMPLE}_1.fastq.gz",
+        fq2 = f"out/{FIRST_SAMPLE}/{FIRST_SAMPLE}_2.fastq.gz",
+        check = f"out/{FIRST_SAMPLE}/{FIRST_SAMPLE}_validating_fastq_pairs.done"
+    output:
+        completed = f"out/stage0_{FIRST_SAMPLE}.txt"
+    conda: "envs/isl.yaml"
+    log: f"logs/irap_stage0_{FIRST_SAMPLE}.log"
+    params:
+        private_script=config["private_script"],
+        conf=config["irap_config"],
+        root_dir=config["atlas_ca_root"],
+        strand="both",
+        irapMem=16000000000,
+        irapDataOption="",
+        filename= f"{FIRST_SAMPLE}",
+        read_type = config["read_type"]
+    resources:
+        mem_mb=16000
+    threads: 16
+    shell:
+        """
+        set -e # snakemake on the cluster doesn't stop on error when --keep-going is set
+        exec &> "{log}"
+	
+        source {params.private_script}/ega_bulk_env.sh
+        source {params.private_script}/ega_bulk_init.sh
+        source {params.root_dir}/isl/lib/generic_routines.sh
+        source {params.root_dir}/isl/lib/process_routines.sh
+        source {params.root_dir}/isl/lib/irap.sh
+	
+        cp {params.private_script}/ega_bulk_env.sh $IRAP_SINGLE_LIB
+
+        library={params.filename}
+        echo "library: $library"
+        workingDir=$ISL_WORKING_DIR
+
+        source {params.root_dir}/scripts/aux.sh
+
+        which get_local_relative_library_path
+        which get_library_path
+
+
+        localFastqPath=$(get_local_relative_library_path $library )
+	
+        echo "workingDir: $workingDir"
+        echo "localFastqPath: $localFastqPath"
+        
+        mkdir -p $(dirname $workingDir/$localFastqPath)
+ 
+        pushd $workingDir > /dev/null
+
+
+        if [[ {params.read_type} == "se" ]]; then
+            # fastq is SE
+            cp {params.root_dir}/{input.fq1} $workingDir/${{localFastqPath}}.fastq
+            java -jar {params.root_dir}/scripts/validatefastq-assembly-0.1.1.jar --fastq1 $workingDir/${{localFastqPath}}.fastq
+
+            echo "Calling irap_single_lib...SE mode"
+            cmd="irap_single_lib -0 -A -f -o irap_single_lib -1 $workingDir/${{localFastqPath}}.fastq -c {params.conf} -s {params.strand} -m {params.irapMem} -t {threads} -C {params.irapDataOption}"
+            echo "stage0 will run now:"
+            eval $cmd
+            echo "stage0 finished"
+        else
+            # fastq is PE
+            echo "Calling irap_single_lib...PE mode"
+            cmd="irap_single_lib -0 -A -f -o irap_single_lib -1 {params.root_dir}/{input.fq1} -2 {params.root_dir}/{input.fq2} -c {params.conf} -s {params.strand} -m {params.irapMem} -t {threads} -C {params.irapDataOption}"
+            echo "stage0 will run now:"
+            eval $cmd
+            echo "stage0 finished"
+        fi
+
+        popd
+
+        touch {output.completed}
+        """
+
+
+rule run_irap:
+    input:
+        fq1 = "out/{sample}/{sample}_1.fastq.gz",
+        fq2 = "out/{sample}/{sample}_2.fastq.gz",
+        check = "out/{sample}/{sample}_validating_fastq_pairs.done",
+        stage0_completed=rules.run_irap_stage0.output.completed
+    output:
+        completed = "out/{sample}/{sample}_irap_completed.done"
+    conda: "envs/isl.yaml"
+    log: "logs/{sample}_irap.log"
+    params:
+        private_script=config["private_script"],
+        conf=config["irap_config"],
+        root_dir=config["atlas_ca_root"],
+        strand="both",
+        irapDataOption="",
+        filename="{sample}",
+        first_sample=f"{FIRST_SAMPLE}",
+        read_type = config["read_type"]
+    resources: 
+        mem_mb=get_mem_mb
+    threads: 24
+    shell:
+        """
+        set -e # snakemake on the cluster doesn't stop on error when --keep-going is set
+        exec &> "{log}"
+
+        irapMem=$(("{resources.mem_mb}000000"))
+	
+        source {params.private_script}/ega_bulk_env.sh
+        source {params.root_dir}/isl/lib/generic_routines.sh
+        source {params.root_dir}/isl/lib/process_routines.sh
+        source {params.root_dir}/isl/lib/irap.sh
+	
+        library={params.filename}
+        echo "library: $library"
+        workingDir=$ISL_WORKING_DIR
+
+        source {params.root_dir}/scripts/aux.sh
+
+        which get_local_relative_library_path
+        which get_library_path
+
+
+        localFastqPath=$(get_local_relative_library_path $library )
+	
+        echo "workingDir: $workingDir"
+        echo "localFastqPath: $localFastqPath"
+
+        echo "sample: {wildcards.sample}"
+        echo "first sample: {params.first_sample}"
+
+        if [[ "{wildcards.sample}" != "{params.first_sample}" ]]; then
+            mkdir -p $(dirname $workingDir/$localFastqPath)
+        fi
+
+        pushd $workingDir > /dev/null
+
+        export THREADS={threads} # for irap_single_lib
+
+        if [[ {params.read_type} == "se" ]]; then
+            # fastq is SE
+            cp {params.root_dir}/{input.fq1} $workingDir/${{localFastqPath}}.fastq
+            java -jar {params.root_dir}/scripts/validatefastq-assembly-0.1.1.jar --fastq1 $workingDir/${{localFastqPath}}.fastq
+
+            echo "Calling irap_single_lib...SE mode"
+            cmd="irap_single_lib -A -f -o irap_single_lib -1 $workingDir/${{localFastqPath}}.fastq -c {params.conf} -s {params.strand} -m $irapMem -t {threads} -C {params.irapDataOption}"
+            echo "SE IRAP will run now:"
+            eval $cmd
+            echo "irap_single_lib SE finished for {wildcards.sample}"
+        else
+            # fastq is PE
+            echo "Calling irap_single_lib..."
+	    
+            cmd="irap_single_lib -A -f -o irap_single_lib -1 {params.root_dir}/{input.fq1} -2 {params.root_dir}/{input.fq2} -c {params.conf} -s {params.strand} -m $irapMem -t {threads} -C {params.irapDataOption}"
+            echo "PE IRAP will run now:"
+            eval $cmd
+            echo "irap_single_lib PE finished for {wildcards.sample}"
+        fi
+
+        popd
+
+        # the files to collected by aggregation from irap are in $IRAP_SINGLE_LIB/out
+        touch {output.completed}
+        """
+
+
+rule prepare_aggregation:
+    """
+    Prepare aggregation of irap outputs, which are at
+    $ISL_WORKING_DIR/irap_single_lib/{root_dir}/out/{sample}
+    and copy essential aggregation files into:
+    $IRAP_SINGLE_LIB/out/{sample[0:5]}/{sample}
+    """
+    input: "out/{sample}/{sample}_irap_completed.done"
+    output: "out/{sample}/{sample}_prepare_aggregation.done"
+    log: "logs/{sample}_prepare_agreggation.log"
+    params:
+        private_script=config["private_script"],
+        root_dir=config["atlas_ca_root"]
+    shell:
+        """
+        set -e # snakemake on the cluster doesn't stop on error when --keep-going is set
+        exec &> "{log}"
+
+        source {params.private_script}/ega_bulk_env.sh
+        prefix_sample=$(echo {wildcards.sample} | cut -c1-6)
+
+        # move irap outputs to $ISL_WORKING_DIR/irap_single_lib/out/sample[0:5]/sample
+
+        destination_dir=$ISL_RESULTS_DIR/$prefix_sample/{wildcards.sample}
+        mkdir -p $destination_dir
+
+        cp $ISL_WORKING_DIR/irap_single_lib{params.root_dir}/out/{wildcards.sample}/{wildcards.sample}*kallisto*  $destination_dir/
+        cp $ISL_WORKING_DIR/irap_single_lib{params.root_dir}/out/{wildcards.sample}/{wildcards.sample}*htseq2*  $destination_dir/
+        cp $ISL_WORKING_DIR/irap_single_lib{params.root_dir}/out/{wildcards.sample}/{wildcards.sample}.versions.tsv  $destination_dir/irap.versions.tsv
+        cp -r $ISL_WORKING_DIR/irap_single_lib{params.root_dir}/out/{wildcards.sample}/logs  $destination_dir/
+        cp -r $ISL_WORKING_DIR/irap_single_lib{params.root_dir}/out/{wildcards.sample}/qc  $destination_dir/
+
+        # file checks
+        if ls "$destination_dir"/*kallisto* 1> /dev/null 2>&1; then
+            echo "Files matching the pattern '*kallisto*' exist in the folder $destination_dir"
+        else
+            echo "No files matching the pattern '*kallisto*' exist in the folder $destination_dir"
+            exit 1
+        fi
+
+        if ls "$destination_dir"/*htseq2* 1> /dev/null 2>&1; then
+            echo "Files matching the pattern '*htseq2*' exist in the folder $destination_dir"
+        else
+            echo "No files matching the pattern '*htseq2*' exist in the folder $destination_dir"
+            exit 1
+        fi        
+
+        echo "tophat2 align summary:"
+        cat $ISL_WORKING_DIR/processing_data/h/homo_sapiens/irap_qc/tophat2/*/{wildcards.sample}/{wildcards.sample}/align_summary.txt
+
+        echo "Controlled-access analysis for EGA dataset completed for {wildcards.sample}. Ready for aggregation"
+
+        touch {output}
+        """
+
+
+rule final_workflow_check:
+    input:
+        expand(["out/{sample}/{sample}_prepare_aggregation.done"], sample=SAMPLES)
+    output: 
+        "out/workflow-irap.done"
+    shell:
+        """
+        set -e # snakemake on the cluster doesn't stop on error when --keep-going is set
+        touch {output}
+        """

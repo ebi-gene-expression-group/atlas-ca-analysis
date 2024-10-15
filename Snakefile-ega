@@ -1,0 +1,170 @@
+import os
+import csv
+from tabulate import tabulate
+from snakemake.utils import min_version
+
+
+min_version("7.25.3")
+
+include: "rules/common.smk" 
+
+
+metadata_df = read_metadata(config["metadata_path"], config["dataset_id"] )
+
+# print metadata table
+headers = ['EGAR ID', 'ENA Run ID', 'Fastq Filename', 'EGAF ID']
+print(tabulate(metadata_df, headers=headers, tablefmt="grid"))
+
+
+def get_unique_fastq_filenames(merged_table):
+    # extract the third column
+    fastq_filenames = [row[2] for row in merged_table]
+
+    # get unique values, keep the order
+    unique_fastq_filenames = list(dict.fromkeys(fastq_filenames))
+    filenames_without_extension = [filename.replace('.fastq.gz', '') for filename in unique_fastq_filenames]
+
+    return filenames_without_extension
+
+FASTQ_FILENAMES = get_unique_fastq_filenames(metadata_df)
+
+
+def get_unique_ega_filenames(merged_table):
+    # extract the fourth column
+    ega_filenames = [row[3] for row in merged_table]
+
+    # get unique values, keep the order
+    unique_ega_filenames = list(dict.fromkeys(ega_filenames))
+
+    return unique_ega_filenames
+
+EGA_FILENAMES = get_unique_ega_filenames(metadata_df)
+
+
+SAMPLES = get_unique_ena_runs(metadata_df)
+print(f"unique EGA filenames: {EGA_FILENAMES}")
+print(f"unique FASTQ filenames: {FASTQ_FILENAMES}")
+print(f"unique ENA filenames (final sample names): {SAMPLES}")
+
+
+wildcard_constraints:
+    egasample="EGAF\d+",
+    sample="ERR\d+"
+
+
+rule all:
+    input: "out/workflow-ega.done"
+
+
+rule create_metadata:
+    output:
+        "out/metadata.csv"
+    run:
+        metadata_df = read_metadata(config["metadata_path"], config["dataset_id"])
+        # write metadata_df to a csv file
+        import csv
+        with open(output[0], "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerows(metadata_df)
+
+
+rule check_initial_data:
+    """
+    Check that the fastq data exists, and the md5s 
+    """
+    input:
+        fastq = config["input_path"]+"/"+config["dataset_id"]+"/{egasample}/{fastqsample}.fastq.gz",
+        metad = "out/metadata.csv"
+    output:
+        file_check = temp("out/{egasample}.{fastqsample}.checked")
+    log:
+        "logs/{egasample}.{fastqsample}.log"
+    shell:
+        """
+        set -e # snakemake on the cluster doesn't stop on error when --keep-going is set
+        exec &> "{log}"
+
+        # check if the input file exists
+        if [ ! -f {input.fastq} ]; then
+            echo "ERROR: Input file {input.fastq} does not exist." >&2
+            exit 1
+        fi
+
+        echo "Input file {input.fastq} exists, proceeding with the pipeline."
+
+        # check if md5 file exists, and calculate message-digest fingerprint (checksum) for the file 
+        if [ -f "{input.fastq}.md5" ]; then
+            echo "md5  file {input.fastq}.md5 exists" >&2
+            expected_md5=$(cat "{input.fastq}.md5" | awk '{{print $1}}')
+            actual_md5=$(md5sum {input.fastq} | awk '{{print $1}}')
+
+            if [[ "$expected_md5" == "$actual_md5" ]]; then
+                echo "MD5 checksum is correct." >&2
+            else
+                echo "Error: MD5 checksum does not match." >&2
+                exit 1
+            fi     
+        fi
+
+        touch {output.file_check}
+        """
+
+
+rule rename_fastqs:
+    input:
+        expand("out/{egasample}.{fastqsample}.checked",
+               zip,
+               egasample=EGA_FILENAMES,
+               fastqsample=FASTQ_FILENAMES)
+    params:
+        input_path=config["input_path"]+"/"+config["dataset_id"],
+        metad="out/metadata.csv"
+    output:
+        "out/rename_fastqs.done"
+    log:
+        "logs/rename_fastqs.log"
+    shell:
+        """
+        set -e # snakemake on the cluster doesn't stop on error when --keep-going is set
+        exec &> "{log}"
+
+	# remove possible trailing spaces
+	sed -i 's/[[:space:]]*$//g' {params.metad}
+
+	# loop over unique ERR* values in the second column
+	cut -d, -f2 {params.metad} | sort -u | while read -r err; do
+    	    echo "ERR: $err"
+            mkdir out/$err
+
+    	    # for each unique ERR* value, find the associated rows and print the desired paths
+    	    grep ",$err," {params.metad} | while IFS=, read -r egar_value ena_value sample_file egaf_value; do
+
+        	echo "{params.input_path}/$egaf_value/$sample_file"
+                paired_suffix=$(echo "$sample_file" | awk -F'_' '{{print "_" $2}}')
+                echo "out/$err/$err$paired_suffix"
+
+		# check file exists and rename
+                if [ -f "{params.input_path}/$egaf_value/$sample_file" ]; then
+		    echo "Copying file {params.input_path}/$egaf_value/$sample_file >> out/$err/$err$paired_suffix"
+                    cp {params.input_path}/$egaf_value/$sample_file out/$err/$err$paired_suffix
+		fi
+    	    done
+    
+
+	done
+
+	touch {output}
+        """
+
+
+rule final_workflow_check:
+    input:
+        "out/rename_fastqs.done"
+    output: 
+        "out/workflow-ega.done"
+    shell:
+        """
+        set -e # snakemake on the cluster doesn't stop on error when --keep-going is set
+        touch {output}
+        """
+
