@@ -62,7 +62,8 @@ if [ $? -ne 0 ]; then
 fi
 
 while read -r library; do
-    resultsDir=$(process_results_dir $library irap_single_lib $organism no no)
+    resultsDir_ini=$(process_results_dir $library irap_single_lib $organism no no)
+    resultsDir=$(echo "$resultsDir_ini" | sed 's/\/[0-9]\{3\}\//\//')
     libraryPathsForStudy="$libraryPathsForStudy $resultsDir"
 
     # Check versions. Take out the parameters, which aren't helpful for
